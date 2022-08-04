@@ -2,6 +2,9 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from loguru import logger
 import joblib
+import time
+import json
+import datetime
 
 from sentence_transformers import SentenceTransformer
 from sklearn.base import BaseEstimator, TransformerMixin
@@ -59,7 +62,7 @@ class NewsCategoryClassifier:
         1. Load the sentence transformer model and initialize the `featurizer` of type `TransformerFeaturizer` (Hint: revisit Week 1 Step 4)
         2. Load the serialized model as defined in GLOBAL_CONFIG['model'] into memory and initialize `model`
         """
-        featurizer = TransformerFeaturizer(self.config["model"]["featurizer"]["sentence_transformer_embedding_dim"], self.config["model"]["featurizer"]["sentence_transformer_embedding_dim"])
+        featurizer = TransformerFeaturizer(self.config["model"]["featurizer"]["sentence_transformer_embedding_dim"], SentenceTransformer(self.config["model"]["featurizer"]["sentence_transformer_model"]))
         classifier = joblib.load(self.config["model"]["classifier"]["serialized_model_path"])
         self.pipeline = Pipeline([
             ('transformer_featurizer', featurizer),
@@ -109,10 +112,11 @@ def startup_event():
         Access to the model instance and log file will be needed in /predict endpoint, make sure you
         store them as global variables
     """
-    global model
+    global classifier
     global logs
 
-    model = NewsCategoryClassifier(GLOBAL_CONFIG)
+    classifier = NewsCategoryClassifier(GLOBAL_CONFIG)
+    print("model loaded")
     logs = open(GLOBAL_CONFIG["service"]["log_destination"],"a")
     logger.info("Setup completed")
 
@@ -147,12 +151,8 @@ def predict(request: PredictRequest):
         3. Construct an instance of `PredictResponse` and return
     """
     start_time = time.time()
-
-    proba = model.predict_proba(request.description)
-    label = model.predict_label(request.title)
-
-    print(proba)
-    print(label)
+    proba = classifier.predict_proba(request.description)
+    label = classifier.predict_label(request.title)
 
     latency = time.time()-start_time
     timestamp = datetime.datetime.now()
