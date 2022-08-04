@@ -14,11 +14,11 @@ GLOBAL_CONFIG = {
             "sentence_transformer_embedding_dim": 768
         },
         "classifier": {
-            "serialized_model_path": "./data/news_classifier.joblib"
+            "serialized_model_path": "../data/news_classifier.joblib"
         }
     },
     "service": {
-        "log_destination": "./data/logs.out"
+        "log_destination": "../data/logs.out"
     }
 }
 
@@ -59,11 +59,11 @@ class NewsCategoryClassifier:
         1. Load the sentence transformer model and initialize the `featurizer` of type `TransformerFeaturizer` (Hint: revisit Week 1 Step 4)
         2. Load the serialized model as defined in GLOBAL_CONFIG['model'] into memory and initialize `model`
         """
-        featurizer = None
-        model = None
+        featurizer = TransformerFeaturizer(self.config["model"]["featurizer"]["sentence_transformer_embedding_dim"], self.config["model"]["featurizer"]["sentence_transformer_embedding_dim"])
+        classifier = joblib.load(self.config["model"]["classifier"]["serialized_model_path"])
         self.pipeline = Pipeline([
             ('transformer_featurizer', featurizer),
-            ('classifier', model)
+            ('classifier', classifier)
         ])
 
     def predict_proba(self, model_input: dict) -> dict:
@@ -80,7 +80,10 @@ class NewsCategoryClassifier:
             ...
         }
         """
-        return {}
+        preds = self.pipeline.predict_proba([model_input])[0].tolist()
+        classes = self.pipeline.classes_
+        probas = {classes[i]: preds[i] for i in range(len(classes))}
+        return probas
 
     def predict_label(self, model_input: dict) -> str:
         """
@@ -91,7 +94,7 @@ class NewsCategoryClassifier:
 
         Output format: predicted label for the model input
         """
-        return ""
+        return self.pipeline.predict(model_input)[0]
 
 
 app = FastAPI()
@@ -106,6 +109,11 @@ def startup_event():
         Access to the model instance and log file will be needed in /predict endpoint, make sure you
         store them as global variables
     """
+    global model
+    global logs
+
+    model = NewsCategoryClassifier(GLOBAL_CONFIG)
+    logs = open(GLOBAL_CONFIG["service"]["log_destination"],"a")
     logger.info("Setup completed")
 
 
@@ -117,6 +125,7 @@ def shutdown_event():
         1. Make sure to flush the log file and close any file pointers to avoid corruption
         2. Any other cleanups
     """
+    logs.close()
     logger.info("Shutting down application")
 
 
@@ -137,9 +146,31 @@ def predict(request: PredictRequest):
         }
         3. Construct an instance of `PredictResponse` and return
     """
-    return {}
+    start_time = time.time()
+
+    proba = model.predict_proba(request.description)
+    label = model.predict_label(request.title)
+
+    print(proba)
+    print(label)
+
+    latency = time.time()-start_time
+    timestamp = datetime.datetime.now()
+
+    log_info = {
+        "timestamp": timestamp.strftime("%Y:%M:%D, %H:%M:%S"),
+        "request": request.dict(),
+        "prediction": label,
+        "latency": latency
+    }
+
+    print(log_info)
+    
+    logs.write(f"{json.dumps(log_info)}\n")
+
+    return PredictResponse(scores=proba, label=label)
 
 
 @app.get("/")
-def read_root():
+async def read_root():
     return {"Hello": "World"}
